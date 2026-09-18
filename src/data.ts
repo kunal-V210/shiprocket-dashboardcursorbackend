@@ -1,0 +1,11 @@
+import { MongoClient } from 'mongodb'
+import { env } from './config.js'
+import type { Dataset, Filters, Order } from './types.js'
+let dataset: Dataset=[]; let client: MongoClient|undefined
+export function setDataset(rows:Dataset){dataset=rows}
+export function getDataset(){return dataset}
+export async function closeMongo(){await client?.close()}
+export async function getMongo(){if(!env.MONGODB_URI||!env.MONGODB_DATABASE) throw new Error('MongoDB is not configured'); client??=new MongoClient(env.MONGODB_URI); await client.connect(); return client.db(env.MONGODB_DATABASE).collection<Order>(env.MONGODB_COLLECTION)}
+export function filterRows(rows:Dataset,f:Filters){const entries=Object.entries(f).filter(([k,v])=>v!==undefined&&v!==''&&!['page','pageSize','sortBy','sortOrder','search'].includes(k)); return rows.filter(r=>entries.every(([k,v])=>{if(k==='startDate')return !r.orderDate||r.orderDate>=String(v); if(k==='endDate')return !r.orderDate||r.orderDate<=String(v); return String(r[k as keyof Order]??'').toLowerCase()===String(v).toLowerCase()})).filter(r=>!f.search||Object.values(r).some(v=>String(v??'').toLowerCase().includes(f.search!.toLowerCase()))) }
+export function metrics(rows:Dataset){const sum=(k:keyof Order)=>{const vals=rows.map(r=>r[k]).filter((v):v is number=>typeof v==='number'); return vals.length?vals.reduce((a,b)=>a+b,0):null}; const revenue=sum('revenue'), cost=[sum('productCost'),sum('shippingCost'),sum('fees')].every(v=>v===null)?null:[sum('productCost'),sum('shippingCost'),sum('fees')].reduce<number>((a,v)=>a+(v??0),0); const profit=sum('profit'); return {totalOrders:rows.length,revenue,productCost:sum('productCost'),shippingCost:sum('shippingCost'),fees:sum('fees'),profit,profitMargin:revenue&&profit!==null?profit/revenue:null,delivered:rows.filter(r=>r.status?.toLowerCase()==='delivered').length,cancelled:rows.filter(r=>r.status?.toLowerCase()==='cancelled').length,rto:rows.filter(r=>r.rto).length,returns:rows.filter(r=>r.return).length,totalCosts:cost} }
+export function groups(rows:Dataset,key:keyof Order){const m=new Map<string,Dataset>(); for(const r of rows){const k=String(r[key]??'Unknown');m.set(k,[...(m.get(k)??[]),r])} return [...m].map(([name,rs])=>({[key]:name,...metrics(rs)}))}
