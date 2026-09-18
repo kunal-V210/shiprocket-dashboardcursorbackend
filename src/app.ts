@@ -7,6 +7,7 @@ import { env } from './config.js'
 import { parseFile } from './parsers.js'
 import { setDataset, getDataset, filterRows, metrics, groups, closeMongo, fetchFromMetabase } from './data.js'
 import type { Filters, Order } from './types.js'
+import { calculatePnl } from './services/pnl.service.js'
 
 const querySchema = z.object({ startDate: z.string().optional(), endDate: z.string().optional(), channel: z.string().optional(), status: z.string().optional(), paymentMethod: z.string().optional(), product: z.string().optional(), sku: z.string().optional(), state: z.string().optional(), city: z.string().optional(), search: z.string().optional(), page: z.coerce.number().int().positive().default(1), pageSize: z.coerce.number().int().positive().max(1000).default(50), sortBy: z.string().optional(), sortOrder: z.enum(['asc', 'desc']).default('desc') })
 const getFilters = (query: unknown) => querySchema.parse(query) as Filters
@@ -57,7 +58,11 @@ export function buildApp() {
   })
 
   app.get('/api/pnl', async (req, reply) => {
-    try { const rows = filterRows(getDataset(), getFilters(req.query)); const m = metrics(rows); return { success: true, revenue: m.revenue, productCost: m.productCost, shippingCost: m.shippingCost, fees: m.fees, returnRtoCost: null, totalCosts: m.totalCosts, profit: m.profit, profitMargin: m.profitMargin, dailyTrend: groups(rows, 'orderDate'), channelBreakdown: groups(rows, 'channel'), productBreakdown: groups(rows, 'product') } } catch (error) { return reply.code(400).send({ success: false, error: error instanceof Error ? error.message : 'P&L fetch failed' }) }
+    try {
+      const filters = getFilters(req.query)
+      const rows = filterRows(getDataset(), filters)
+      return { success: true, ...calculatePnl(rows, filters) }
+    } catch (error) { return reply.code(400).send({ success: false, error: error instanceof Error ? error.message : 'P&L fetch failed' }) }
   })
   app.get('/api/products', async (req) => ({ success: true, rows: groups(filterRows(getDataset(), getFilters(req.query)), 'product') }))
   app.get('/api/channels', async (req) => ({ success: true, rows: groups(filterRows(getDataset(), getFilters(req.query)), 'channel') }))
